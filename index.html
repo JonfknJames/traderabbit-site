@@ -161,6 +161,7 @@
         .brand {
             font-family: 'LowerPixel', 'Space Grotesk', sans-serif;
             font-size: 2.5rem;
+            white-space: nowrap;
             font-weight: 700;
             letter-spacing: 0.15em;
             text-transform: none;
@@ -332,7 +333,7 @@
         /* ── Responsive ── */
         @media (max-width: 600px) {
             .brand {
-                font-size: 2rem;
+                font-size: 1.2rem;
                 letter-spacing: 0.08em;
             }
 
@@ -404,15 +405,22 @@
 
     <script>
         // ── Live Ticker ──
-        const AV_KEY = 'J3RVYIEMTEXOUREW';
-        const CACHE_TTL = 5 * 60 * 1000; // 5 min cache to preserve API quota
+        const FINNHUB_KEY = 'd6bj2o1r01qp4lhvku50d6bj2o1r01qp4lhvku5g';
+        const CACHE_TTL = 5 * 60 * 1000; // 5 min cache
 
-        const STOCKS = ['AAPL', 'TSLA', 'NVDA', 'MSFT', 'AMZN', 'META', 'GOOGL'];
-        const CRYPTO_IDS = { bitcoin: 'BTC', ethereum: 'ETH', solana: 'SOL' };
-        const FOREX = [
+        const STOCKS = ['AAPL', 'TSLA', 'NVDA', 'MSFT', 'AMZN', 'META', 'GOOGL', 'JPM', 'GS', 'V'];
+        const CRYPTO_IDS = {
+            bitcoin: 'BTC', ethereum: 'ETH', solana: 'SOL',
+            'binancecoin': 'BNB', cardano: 'ADA', ripple: 'XRP',
+            dogecoin: 'DOGE', polkadot: 'DOT'
+        };
+        const FOREX_PAIRS = [
             { from: 'EUR', to: 'USD' },
             { from: 'GBP', to: 'USD' },
             { from: 'USD', to: 'JPY' },
+            { from: 'USD', to: 'CHF' },
+            { from: 'AUD', to: 'USD' },
+            { from: 'USD', to: 'CAD' },
         ];
 
         function fmt(n) {
@@ -430,55 +438,43 @@
             const html = items.map(t =>
                 `<span><span class="sym">${t.sym}</span> ${t.prefix || '$'}${t.price} <span class="${t.up ? 'up' : 'down'}">${t.change}</span></span>`
             ).join('');
-            track.innerHTML = html + html;
+            track.innerHTML = html + html; // duplicate for seamless scroll
         }
 
-        // ── Cache helpers (sessionStorage) ──
+        // ── Cache helpers (in-memory) ──
+        const _cache = {};
         function cacheGet(key) {
-            try {
-                const raw = sessionStorage.getItem('tr_' + key);
-                if (!raw) return null;
-                const { data, ts } = JSON.parse(raw);
-                if (Date.now() - ts > CACHE_TTL) return null;
-                return data;
-            } catch { return null; }
+            const entry = _cache[key];
+            if (!entry) return null;
+            if (Date.now() - entry.ts > CACHE_TTL) { delete _cache[key]; return null; }
+            return entry.data;
         }
         function cacheSet(key, data) {
-            try { sessionStorage.setItem('tr_' + key, JSON.stringify({ data, ts: Date.now() })); }
-            catch {}
+            _cache[key] = { data, ts: Date.now() };
         }
 
-        // ── Alpha Vantage: Stock quote ──
-        async function fetchStock(sym) {
-            const cached = cacheGet('stock_' + sym);
+        // ── Finnhub: Stock quotes ──
+        async function fetchStocks() {
+            const cached = cacheGet('stocks');
             if (cached) return cached;
-            const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${sym}&apikey=${AV_KEY}`;
-            const res = await fetch(url);
-            const json = await res.json();
-            const q = json['Global Quote'];
-            if (!q || !q['05. price']) return null;
-            const price = parseFloat(q['05. price']);
-            const pct = parseFloat(q['10. change percent']);
-            const item = { sym, price: fmt(price), change: pctStr(pct), up: pct >= 0 };
-            cacheSet('stock_' + sym, item);
-            return item;
-        }
-
-        // ── Alpha Vantage: Forex ──
-        async function fetchForex(from, to) {
-            const key = `fx_${from}${to}`;
-            const cached = cacheGet(key);
-            if (cached) return cached;
-            const url = `https://www.alphavantage.co/query?function=CURRENCY_EXCHANGE_RATE&from_currency=${from}&to_currency=${to}&apikey=${AV_KEY}`;
-            const res = await fetch(url);
-            const json = await res.json();
-            const r = json['Realtime Currency Exchange Rate'];
-            if (!r) return null;
-            const rate = parseFloat(r['5. Exchange Rate']);
-            // Forex doesn't return % change, show rate only
-            const item = { sym: from + '/' + to, price: rate.toFixed(to === 'JPY' ? 2 : 4), change: '', up: true, prefix: '' };
-            cacheSet(key, item);
-            return item;
+            const items = [];
+            for (const sym of STOCKS) {
+                try {
+                    const res = await fetch(`https://finnhub.io/api/v1/quote?symbol=${sym}&token=${FINNHUB_KEY}`);
+                    const q = await res.json();
+                    if (q && q.c) {
+                        const pct = q.dp || ((q.c - q.pc) / q.pc * 100);
+                        items.push({
+                            sym,
+                            price: fmt(q.c),
+                            change: pctStr(pct),
+                            up: pct >= 0
+                        });
+                    }
+                } catch {}
+            }
+            if (items.length) cacheSet('stocks', items);
+            return items;
         }
 
         // ── CoinGecko: Crypto (bulk, free, no key) ──
@@ -486,60 +482,118 @@
             const cached = cacheGet('crypto');
             if (cached) return cached;
             const ids = Object.keys(CRYPTO_IDS).join(',');
-            const res = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`);
-            const data = await res.json();
+            try {
+                const res = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`);
+                const data = await res.json();
+                const items = [];
+                for (const [id, sym] of Object.entries(CRYPTO_IDS)) {
+                    const d = data[id];
+                    if (!d) continue;
+                    const pct = d.usd_24h_change || 0;
+                    items.push({ sym, price: fmt(d.usd), change: pctStr(pct), up: pct >= 0 });
+                }
+                if (items.length) cacheSet('crypto', items);
+                return items;
+            } catch { return []; }
+        }
+
+        // ── ExchangeRate-API: Forex (free, no key) ──
+        async function fetchForex() {
+            const cached = cacheGet('forex');
+            if (cached) return cached;
             const items = [];
-            for (const [id, sym] of Object.entries(CRYPTO_IDS)) {
-                const d = data[id];
-                if (!d) continue;
-                const pct = d.usd_24h_change || 0;
-                items.push({ sym, price: fmt(d.usd), change: pctStr(pct), up: pct >= 0 });
-            }
-            cacheSet('crypto', items);
+            try {
+                // Fetch USD-based rates
+                const resUSD = await fetch('https://open.er-api.com/v6/latest/USD');
+                const usdData = await resUSD.json();
+                // Fetch EUR-based rates for EUR/USD
+                const resEUR = await fetch('https://open.er-api.com/v6/latest/EUR');
+                const eurData = await resEUR.json();
+                // Fetch GBP-based rates for GBP/USD
+                const resGBP = await fetch('https://open.er-api.com/v6/latest/GBP');
+                const gbpData = await resGBP.json();
+                // Fetch AUD-based rates for AUD/USD
+                const resAUD = await fetch('https://open.er-api.com/v6/latest/AUD');
+                const audData = await resAUD.json();
+
+                const pairs = [
+                    { sym: 'EUR/USD', rate: eurData.rates?.USD, decimals: 4 },
+                    { sym: 'GBP/USD', rate: gbpData.rates?.USD, decimals: 4 },
+                    { sym: 'USD/JPY', rate: usdData.rates?.JPY, decimals: 2 },
+                    { sym: 'USD/CHF', rate: usdData.rates?.CHF, decimals: 4 },
+                    { sym: 'AUD/USD', rate: audData.rates?.USD, decimals: 4 },
+                    { sym: 'USD/CAD', rate: usdData.rates?.CAD, decimals: 4 },
+                ];
+
+                for (const p of pairs) {
+                    if (p.rate) {
+                        items.push({
+                            sym: p.sym,
+                            price: p.rate.toFixed(p.decimals),
+                            change: '',
+                            up: true,
+                            prefix: ''
+                        });
+                    }
+                }
+            } catch {}
+            if (items.length) cacheSet('forex', items);
             return items;
         }
 
-        // ── Orchestrate with rate-limit awareness ──
-        // AV free tier: 25 req/day. Stagger stock calls, cache aggressively.
-        async function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+        // ── Fallback static data (shown while APIs load) ──
+        const FALLBACK = [
+            { sym: 'BTC', price: '68,412.30', change: '+2.4%', up: true },
+            { sym: 'ETH', price: '3,891.05', change: '+1.8%', up: true },
+            { sym: 'AAPL', price: '198.11', change: '-0.3%', up: false },
+            { sym: 'EUR/USD', price: '1.0842', change: '+0.1%', up: true, prefix: '' },
+            { sym: 'NVDA', price: '878.02', change: '+1.2%', up: true },
+            { sym: 'GBP/USD', price: '1.2645', change: '-0.2%', up: false, prefix: '' },
+            { sym: 'TSLA', price: '241.37', change: '+3.1%', up: true },
+            { sym: 'SOL', price: '172.88', change: '+4.2%', up: true },
+        ];
 
-        const allItems = [];
+        // Show fallback immediately
+        renderTicker(FALLBACK);
 
+        // ── Orchestrate API calls ──
         async function fetchAll() {
-            allItems.length = 0;
+            const allItems = [];
 
-            // 1. Crypto first (CoinGecko, instant, no AV quota)
-            try {
-                const crypto = await fetchCrypto();
-                allItems.push(...crypto);
-                renderTicker(allItems);
-            } catch {}
+            // 1. Crypto (CoinGecko — no rate concern)
+            const crypto = await fetchCrypto();
+            if (crypto.length) allItems.push(...crypto);
 
-            // 2. Stocks (stagger to respect rate limits)
-            for (const sym of STOCKS) {
-                try {
-                    const item = await fetchStock(sym);
-                    if (item) { allItems.push(item); renderTicker(allItems); }
-                } catch {}
-                await delay(1500); // ~1.5s between calls
-            }
+            // 2. Stocks (Finnhub — 60 calls/min free)
+            const stocks = await fetchStocks();
+            if (stocks.length) allItems.push(...stocks);
 
-            // 3. Forex
-            for (const { from, to } of FOREX) {
-                try {
-                    const item = await fetchForex(from, to);
-                    if (item) { allItems.push(item); renderTicker(allItems); }
-                } catch {}
-                await delay(1500);
+            // 3. Forex (Finnhub)
+            const forex = await fetchForex();
+            if (forex.length) allItems.push(...forex);
+
+            // Interleave: crypto, stock, forex, crypto, stock, forex...
+            if (allItems.length) {
+                const grouped = { crypto: [], stocks: [], forex: [] };
+                crypto.forEach(i => grouped.crypto.push(i));
+                stocks.forEach(i => grouped.stocks.push(i));
+                forex.forEach(i => grouped.forex.push(i));
+
+                const mixed = [];
+                const maxLen = Math.max(grouped.crypto.length, grouped.stocks.length, grouped.forex.length);
+                for (let i = 0; i < maxLen; i++) {
+                    if (i < grouped.crypto.length) mixed.push(grouped.crypto[i]);
+                    if (i < grouped.stocks.length) mixed.push(grouped.stocks[i]);
+                    if (i < grouped.forex.length) mixed.push(grouped.forex[i]);
+                }
+                renderTicker(mixed);
             }
         }
 
         fetchAll();
-        // Refresh every 5 min (matches cache TTL)
         setInterval(fetchAll, CACHE_TTL);
 
         // ── Form → Google Sheets ──
-        // Replace this URL with your deployed Google Apps Script web app URL
         const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbzrlzPkihmRs9jhjkw3qeRPX3bUzMvvvuFlCEMlcQNiZxIUWjHVov92bpsJwWOUBhDB/exec';
 
         document.getElementById('signup-form').addEventListener('submit', async function(e) {
@@ -558,7 +612,6 @@
                     timestamp: new Date().toISOString(),
                 });
                 await fetch(SHEETS_URL + '?' + params.toString(), { mode: 'no-cors' });
-                // no-cors means we can't read the response, but the request goes through
                 this.style.display = 'none';
                 document.querySelector('.form-note').style.display = 'none';
                 document.getElementById('success-msg').classList.add('show');
