@@ -31,8 +31,9 @@
         }
 
         html, body {
-            height: 100%;
-            overflow: hidden;
+            min-height: 100%;
+            overflow-x: hidden;
+            overflow-y: auto;
         }
 
         body {
@@ -354,6 +355,43 @@
 
             .input-group button {
                 border-radius: 0;
+            }
+        }
+
+        /* Landscape mobile / short viewports */
+        @media (max-height: 500px) {
+            body {
+                align-items: flex-start;
+            }
+
+            .content {
+                padding: 1rem 2rem 3rem;
+            }
+
+            .logo-wrap {
+                width: 70px;
+                height: 70px;
+                margin-bottom: 0.75rem;
+            }
+
+            .brand {
+                font-size: 1.4rem;
+                margin-bottom: 0.75rem;
+            }
+
+            .coming-soon {
+                font-size: 0.7rem;
+                margin-bottom: 0.75rem;
+                padding: 0.35rem 1rem;
+            }
+
+            .tagline {
+                font-size: 0.85rem;
+                margin-bottom: 1.25rem;
+            }
+
+            .top-bar {
+                height: 2px;
             }
         }
     </style>
