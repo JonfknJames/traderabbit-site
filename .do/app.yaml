@@ -1,0 +1,37 @@
+# DigitalOcean App Platform spec for traderabbit-site
+#
+# Static marketing site for traderabbit.ai.
+#
+# Migrated off GitHub Pages 2026-05-31. The source repo was flipped to
+# private during the stealth pass and Pages free tier doesn't serve
+# private repos. DO Apps Starter handles this at $0 (3rd of 3 free
+# static_sites on this account).
+#
+# Region: tor (Toronto). Mirrors payus-website + callrabbit-website.
+#
+# Note on PRIMARY/ALIAS: the existing GitHub Pages CNAME file was
+# www.traderabbit.ai, so historically www was the canonical hostname.
+# Mirror that here — PRIMARY=www.traderabbit.ai, ALIAS=traderabbit.ai.
+# (callrabbit.ai inverts this because its CNAME was the apex.)
+#
+# `zone` omitted — external DNS at Namecheap, same as the other two sites.
+
+name: traderabbit-site
+region: tor
+
+domains:
+  - domain: www.traderabbit.ai
+    type: PRIMARY
+  - domain: traderabbit.ai
+    type: ALIAS
+
+static_sites:
+  - name: site
+    github:
+      repo: JonfknJames/traderabbit-site
+      branch: main
+      deploy_on_push: true
+    source_dir: /
+    output_dir: /
+    routes:
+      - path: /
