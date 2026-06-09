@@ -443,7 +443,9 @@
 
     <script>
         // ── Live Ticker ──
-        const FINNHUB_KEY = 'd6bj2o1r01qp4lhvku50d6bj2o1r01qp4lhvku5g';
+        // Stock quotes proxied via Cloudflare Worker (key held server-side).
+        // Source: github.com/JonfknJames/traderabbit-proxy (private repo).
+        const QUOTE_PROXY = 'https://traderabbit-proxy.jj-75f.workers.dev';
         const CACHE_TTL = 5 * 60 * 1000; // 5 min cache
 
         const STOCKS = ['AAPL', 'TSLA', 'NVDA', 'MSFT', 'AMZN', 'META', 'GOOGL', 'JPM', 'GS', 'V'];
@@ -498,7 +500,7 @@
             const items = [];
             for (const sym of STOCKS) {
                 try {
-                    const res = await fetch(`https://finnhub.io/api/v1/quote?symbol=${sym}&token=${FINNHUB_KEY}`);
+                    const res = await fetch(`${QUOTE_PROXY}/quote?symbol=${encodeURIComponent(sym)}`);
                     const q = await res.json();
                     if (q && q.c) {
                         const pct = q.dp || ((q.c - q.pc) / q.pc * 100);
