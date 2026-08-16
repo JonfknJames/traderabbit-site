@@ -426,6 +426,12 @@
         <div class="form-wrap">
             <form class="input-group" id="signup-form">
                 <input type="email" placeholder="Enter your email" required aria-label="Email address">
+                <!-- Honeypot. Real users never see or tab to this; bots that fill every
+                     input give themselves away. Not display:none — some bots skip those.
+                     Off-screen + aria-hidden + tabindex=-1 keeps it invisible to humans
+                     and screen readers while still looking fillable to a scraper. -->
+                <input type="text" name="company" id="tr-company" tabindex="-1" autocomplete="off"
+                       aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0">
                 <button type="submit">Notify Me</button>
             </form>
             <p class="form-note">No spam. Just launch updates.</p>
@@ -634,13 +640,53 @@
         setInterval(fetchAll, CACHE_TTL);
 
         // ── Form → Google Sheets ──
+        //
+        // LIMIT OF THE SPAM GATES BELOW, stated plainly so nobody mistakes them for a fix:
+        // this URL is public and sits in the page source, and the request is a plain GET.
+        // Anything client-side — the honeypot, the timing check, the email regex — is
+        // skipped entirely by hitting the endpoint directly. These gates only stop bots
+        // that actually render the page and drive the form, which is most drive-by spam
+        // but not a determined one.
+        //
+        // The only defence that survives a direct request has to run INSIDE the Apps
+        // Script: verify a Cloudflare Turnstile token server-side, reject duplicate
+        // emails, and rate-limit. That lives in the Google account, not this repo.
         const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbzrlzPkihmRs9jhjkw3qeRPX3bUzMvvvuFlCEMlcQNiZxIUWjHVov92bpsJwWOUBhDB/exec';
+
+        // Page-load stamp for the timing check below.
+        const TR_LOADED_AT = Date.now();
+        // Deliberately low. The obvious value is ~2500ms ("nobody reads and types that
+        // fast"), but a returning visitor with browser autofill can legitimately land,
+        // click, and submit inside that — and losing a real signup costs more than one
+        // junk row in a waitlist sheet. 1200ms still catches programmatic submits, which
+        // fire in tens of milliseconds, while being effectively impossible for a human to
+        // trip: they have to orient, reach the field and press the button.
+        const TR_MIN_FILL_MS = 1200;
+        const TR_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i;
+
+        // Bots get the success state, not an error. Telling a bot it failed just teaches it
+        // to retry differently; a silent accept costs it a submission and tells it nothing.
+        function trFakeSuccess(form) {
+            form.style.display = 'none';
+            document.querySelector('.form-note').style.display = 'none';
+            document.getElementById('success-msg').classList.add('show');
+        }
 
         document.getElementById('signup-form').addEventListener('submit', async function(e) {
             e.preventDefault();
             const emailInput = this.querySelector('input[type="email"]');
             const email = emailInput.value.trim();
             if (!email) return;
+
+            // ── Spam gates (client-side only — see the note above SHEETS_URL) ──
+            // 1. Honeypot filled → automated.
+            const hp = document.getElementById('tr-company');
+            if (hp && hp.value) { trFakeSuccess(this); return; }
+            // 2. Submitted implausibly fast after load → automated.
+            if (Date.now() - TR_LOADED_AT < TR_MIN_FILL_MS) { trFakeSuccess(this); return; }
+            // 3. type="email" accepts things like a@b — require a real TLD.
+            if (!TR_EMAIL_RE.test(email)) { emailInput.setCustomValidity('Please enter a valid email address.'); emailInput.reportValidity(); return; }
+            emailInput.setCustomValidity('');
 
             const btn = this.querySelector('button');
             btn.textContent = 'SENDING...';
