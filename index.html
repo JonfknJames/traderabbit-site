@@ -678,12 +678,19 @@
             const email = emailInput.value.trim();
             if (!email) return;
 
-            // ── Spam gates (client-side only — see the note above SHEETS_URL) ──
+            // ── Spam gates ──
+            // These run here for a fast, quiet rejection, and the same values are SENT so
+            // Apps Script can re-check them. Re-checking is the half that matters: the
+            // /exec URL is in this page's source, so anything can call it directly and
+            // skip every check below. A gate that only runs in the browser is a gate a bot
+            // walks around.
             // 1. Honeypot filled → automated.
             const hp = document.getElementById('tr-company');
-            if (hp && hp.value) { trFakeSuccess(this); return; }
+            const hpValue = hp ? hp.value : '';
+            if (hpValue) { trFakeSuccess(this); return; }
             // 2. Submitted implausibly fast after load → automated.
-            if (Date.now() - TR_LOADED_AT < TR_MIN_FILL_MS) { trFakeSuccess(this); return; }
+            const elapsedMs = Date.now() - TR_LOADED_AT;
+            if (elapsedMs < TR_MIN_FILL_MS) { trFakeSuccess(this); return; }
             // 3. type="email" accepts things like a@b — require a real TLD.
             if (!TR_EMAIL_RE.test(email)) { emailInput.setCustomValidity('Please enter a valid email address.'); emailInput.reportValidity(); return; }
             emailInput.setCustomValidity('');
@@ -696,6 +703,11 @@
                 const params = new URLSearchParams({
                     email,
                     timestamp: new Date().toISOString(),
+                    // Sent so the server can re-run the gates above. `company` is the
+                    // honeypot and is empty by the time we get here — sending it lets the
+                    // server reject a request that arrived with it filled.
+                    company: hpValue,
+                    elapsedMs: String(elapsedMs),
                 });
                 await fetch(SHEETS_URL + '?' + params.toString(), { mode: 'no-cors' });
                 this.style.display = 'none';
